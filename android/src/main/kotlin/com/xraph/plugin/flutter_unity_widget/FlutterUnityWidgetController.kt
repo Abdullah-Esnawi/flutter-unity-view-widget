@@ -116,10 +116,6 @@ class FlutterUnityWidgetController(
             }
             "unity#createPlayer" -> {
                 invalidateFrameIfNeeded()
-                // Only here, not on view construction: a widget mounting after an
-                // exit still gets today's reuse behaviour. This call is the one a
-                // Flutter caller makes deliberately after unload() to boot again.
-                UnityPlayerUtils.recreateIfUnloaded()
                 this.createPlayer()
                 refocusUnity()
                 result.success(null)

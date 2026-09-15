@@ -89,8 +89,15 @@ class UnityPlayerUtils {
                 throw java.lang.Exception("Unity activity is null")
             }
 
-            if (unityPlayer != null) {
-                unityLoaded = true
+            // Reuse only a player whose runtime is still up. After
+            // UnityPlayer.unload() the object survives but its runtime does
+            // not: every scene is gone and it renders nothing. Reusing it
+            // here — and asserting unityLoaded = true on the way past, which
+            // made the lie permanent — is why the view after an unload showed
+            // an empty surface for ever, with no scene load and so no message
+            // back to the host. Unity's documented re-entry after unload() is
+            // a new UnityPlayer.
+            if (unityPlayer != null && unityLoaded) {
                 unityPlayer!!.bringToFront()
                 unityPlayer!!.requestLayout()
                 unityPlayer!!.invalidate()
@@ -98,6 +105,8 @@ class UnityPlayerUtils {
                 callback?.onReady()
                 return
             }
+
+            recreateIfUnloaded()
 
             try {
                 unityPlayer = CustomUnityPlayer(activity!!, lifecycleDispatcher)
