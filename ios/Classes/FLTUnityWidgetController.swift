@@ -86,26 +86,41 @@ public class FLTUnityWidgetController: NSObject, FLTUnityOptionsSink, FlutterPla
     }
 
     private func startUnityIfNeeded() {
+        // Attach when Unity is actually up, not on the next unrelated plugin
+        // call. Framework init runs on a later main-queue turn, so the
+        // synchronous attach in attachView() below finds no root view yet on
+        // a cold start — and on a reboot after unload, nothing else calls in
+        // until Flutter answers SendCode, leaving the freshly booted player in
+        // its own (lower) window while the overlay has already lifted.
         GetUnityPlayerUtils().createPlayer(completed: { [self] (view: UIView?) in
-
+            if self._disposed { return }
+            self.attachUnityViewIfNeeded()
         })
     }
 
     func attachView() {
         startUnityIfNeeded()
+        attachUnityViewIfNeeded()
+        GetUnityPlayerUtils().resume()
+    }
 
-        let unityView = GetUnityPlayerUtils().ufw?.appController()?.rootView
-        if let superview = unityView?.superview {
-            unityView?.removeFromSuperview()
+    /// Moves Unity's root view under this platform view. Idempotent: the
+    /// createPlayer completion and attachView both call it, and on the
+    /// already-initialized path they do so back to back.
+    private func attachUnityViewIfNeeded() {
+        guard let unityView = GetUnityPlayerUtils().ufw?.appController()?.rootView else {
+            return
+        }
+        if unityView.superview == _rootView {
+            return
+        }
+        if let superview = unityView.superview {
+            unityView.removeFromSuperview()
             superview.layoutIfNeeded()
         }
-
-        if let unityView = unityView {
-            _rootView.addSubview(unityView)
-            _rootView.layoutIfNeeded()
-            self.channel?.invokeMethod("events#onViewReattached", arguments: "")
-        }
-        GetUnityPlayerUtils().resume()
+        _rootView.addSubview(unityView)
+        _rootView.layoutIfNeeded()
+        self.channel?.invokeMethod("events#onViewReattached", arguments: "")
     }
 
     func reattachView() {
@@ -159,6 +174,11 @@ public class FLTUnityWidgetController: NSObject, FLTUnityOptionsSink, FlutterPla
     /// Handles scene changed event from unity in the current view
     func handleSceneChangeEvent(info: Dictionary<String, Any>) {
         self.channel?.invokeMethod("events#onUnitySceneLoaded", arguments: info)
+    }
+
+    /// Unity finished unloadApplication(). Same payload Android sends.
+    func handleUnloaded() {
+        self.channel?.invokeMethod("events#onUnityUnloaded", arguments: true)
     }
     
     /// Post messages to unity from flutter

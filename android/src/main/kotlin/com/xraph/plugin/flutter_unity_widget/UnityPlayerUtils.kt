@@ -33,6 +33,44 @@ class UnityPlayerUtils {
 
         private val mUnityEventListeners = CopyOnWriteArraySet<UnityEventListener>()
 
+        /**
+         * UnityPlayer takes exactly one IUnityPlayerLifecycleEvents, at
+         * construction. Handing it the controller that happened to construct
+         * the player meant onUnityPlayerUnloaded reached only that controller —
+         * every later widget that reused the player (the normal case after an
+         * exit and relaunch) never heard that its unload had finished. Fan out
+         * to every live controller instead, the way messages and scene loads
+         * already do. Iterates a snapshot: a controller may dispose itself in
+         * response.
+         */
+        private val lifecycleDispatcher = object : IUnityPlayerLifecycleEvents {
+            override fun onUnityPlayerUnloaded() {
+                for (c in controllers.toList()) c.onUnityPlayerUnloaded()
+            }
+
+            override fun onUnityPlayerQuitted() {
+                for (c in controllers.toList()) c.onUnityPlayerQuitted()
+            }
+        }
+
+        /**
+         * Drop a player whose runtime has been unloaded so the next
+         * [createUnityPlayer] constructs a fresh one. Unity's documented
+         * re-entry after unload() is a new UnityPlayer — the runtime keeps
+         * "memory necessary for running Unity in the same process again" —
+         * whereas the old object is left paused with no scenes, and reusing it
+         * (as the not-null shortcut in createUnityPlayer does) shows nothing.
+         * The old player is not destroy()ed: that path calls unloadNative and
+         * ends the possibility of running Unity in this process at all.
+         */
+        fun recreateIfUnloaded() {
+            val stale = unityPlayer ?: return
+            if (unityLoaded) return
+            Log.d(LOG_TAG, "dropping unloaded UnityPlayer so the next create boots a fresh one")
+            (stale.parent as? ViewGroup)?.removeView(stale)
+            unityPlayer = null
+        }
+
         fun focus() {
             try {
                 unityPlayer!!.windowFocusChanged(unityPlayer!!.requestFocus())
@@ -46,7 +84,7 @@ class UnityPlayerUtils {
          * Create a new unity player with callback
          */
         @SuppressLint("NewApi")
-        fun createUnityPlayer(ule: IUnityPlayerLifecycleEvents, callback: OnCreateUnityViewCallback?) {
+        fun createUnityPlayer(callback: OnCreateUnityViewCallback?) {
             if (activity == null) {
                 throw java.lang.Exception("Unity activity is null")
             }
@@ -62,7 +100,7 @@ class UnityPlayerUtils {
             }
 
             try {
-                unityPlayer = CustomUnityPlayer(activity!!, ule)
+                unityPlayer = CustomUnityPlayer(activity!!, lifecycleDispatcher)
 
                 // Assign mUnityPlayer in the Activity, see FlutterUnityActivity.kt for more details
                 if(activity is FlutterUnityActivity) {

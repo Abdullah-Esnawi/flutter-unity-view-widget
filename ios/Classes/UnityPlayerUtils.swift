@@ -163,6 +163,19 @@ var sharedApplication: UIApplication?
         self.ufw = nil
         self._isUnityReady = false
         self._isUnityLoaded = false
+
+        // Tell Dart. Android has always raised events#onUnityUnloaded from
+        // IUnityPlayerLifecycleEvents.onUnityPlayerUnloaded; iOS only flipped
+        // these flags, so a Flutter caller had no way to learn when
+        // unloadApplication() had actually finished — and any plugin call made
+        // before that point reattaches to a framework mid-teardown. Delivered to
+        // every live controller, like messages and scene loads, so the widget
+        // that requested the unload hears about it even if others came and went.
+        DispatchQueue.main.async {
+            for c in globalControllers {
+                c.handleUnloaded()
+            }
+        }
     }
 
     @objc func handleAppStateDidChange(notification: Notification?) {
