@@ -120,6 +120,7 @@ public class FLTUnityWidgetController: NSObject, FLTUnityOptionsSink, FlutterPla
         }
         _rootView.addSubview(unityView)
         _rootView.layoutIfNeeded()
+        guard canSendToFlutter else { return }
         self.channel?.invokeMethod("events#onViewReattached", arguments: "")
     }
 
@@ -165,19 +166,30 @@ public class FLTUnityWidgetController: NSObject, FLTUnityOptionsSink, FlutterPla
         _disposed = true
     }
     
+    /// A channel outlives the engine it talks to: the object stays non-nil
+    /// after the engine's shell is torn down, so the optional-chaining above
+    /// is not the check it looks like. Sending then trips the engine's
+    /// assertion and aborts the process. See `unityHostIsTerminating`.
+    private var canSendToFlutter: Bool {
+        return !_disposed && !unityHostIsTerminating
+    }
+
     /// Handles messages from unity in the current view
     func handleMessage(message: String) {
+        guard canSendToFlutter else { return }
         self.channel?.invokeMethod("events#onUnityMessage", arguments: message)
     }
-    
-    
+
+
     /// Handles scene changed event from unity in the current view
     func handleSceneChangeEvent(info: Dictionary<String, Any>) {
+        guard canSendToFlutter else { return }
         self.channel?.invokeMethod("events#onUnitySceneLoaded", arguments: info)
     }
 
     /// Unity finished unloadApplication(). Same payload Android sends.
     func handleUnloaded() {
+        guard canSendToFlutter else { return }
         self.channel?.invokeMethod("events#onUnityUnloaded", arguments: true)
     }
     

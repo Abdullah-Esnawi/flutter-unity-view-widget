@@ -67,6 +67,23 @@ func GetUnityPlayerUtils() -> UnityPlayerUtils {
 var controller: UnityAppController?
 var sharedApplication: UIApplication?
 
+/// True once the app has begun terminating, which makes the Flutter engine
+/// unusable from this point on.
+///
+/// Unity's shutdown is driven from `applicationWillTerminate:`, and it
+/// force-completes any scene load still in flight instead of abandoning it
+/// (`PreloadManager::Stop` -> `LoadSceneOperation::IntegrateMainThread`).
+/// That raises `sceneLoaded` during teardown, so Unity code can still send
+/// a message after the engine's shell is gone. Pushing it onto a method
+/// channel then trips the engine's own assertion -- "Sending a message
+/// before the FlutterEngine has been run" -- and an uncaught NSException
+/// aborts the process, which the user sees as a crash while closing the
+/// app mid-load.
+///
+/// Set synchronously before Unity is told to terminate, so every message
+/// Unity emits during cleanup is already on the dropped side of the fence.
+var unityHostIsTerminating = false
+
 @objc protocol UnityEventListener: AnyObject {
 
     func onReceiveMessage(_ message: UnsafePointer<Int8>?)
@@ -195,6 +212,9 @@ var sharedApplication: UIApplication?
         } else if notification?.name == UIApplication.didBecomeActiveNotification {
             unityAppController?.applicationDidBecomeActive(application)
         } else if notification?.name == UIApplication.willTerminateNotification {
+            // Before Unity, not after: its cleanup runs synchronously inside
+            // this call and emits messages on the way out.
+            unityHostIsTerminating = true
             unityAppController?.applicationWillTerminate(application)
         } else if notification?.name == UIApplication.didReceiveMemoryWarningNotification {
             // UnityAppController does not implement applicationDidReceiveMemoryWarning:,
